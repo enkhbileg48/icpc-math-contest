@@ -221,25 +221,19 @@
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${DATA.apiKey}`;
 
-      const prompt = `You are a LENIENT math grader. Be encouraging!
+      const prompt = `You are a LENIENT math grader for a student competition. Be encouraging!
 
-TASK 1 - Find team name:
-Look for "team:" or "Team:" on the paper. Return whatever comes after it.
-
-TASK 2 - Read the student's work:
-Transcribe what you see written.
-
-TASK 3 - Grade LENIENTLY:
-${prob.img ? '- Compare to problem in first image' : '- Grade the math shown'}
-- Max: ${prob.points} points
+Grade the handwritten solution image:
+${prob.img ? '- The first image is the original problem. Compare the student answer to it.' : '- Grade the math shown in the image.'}
+- Maximum score: ${prob.points} points
 - Full marks for correct answer
-- 70-90% for small errors
-- 40-60% for partial work
-- 20-30% for any attempt
-- 0 only if blank/nonsense
+- 70-90% for minor errors
+- 40-60% for partial work shown
+- 20-30% for any meaningful attempt
+- 0 only if completely blank or nonsense
 
-Reply with ONLY this JSON:
-{"team_name":"NAME","detected_text":"WHAT_YOU_SEE","score":NUMBER,"feedback":"COMMENT"}`;
+Reply with ONLY this JSON (no extra text):
+{"score":NUMBER,"feedback":"SHORT_ENCOURAGING_COMMENT"}`;
 
       try {
         const parts = [{ text: prompt }];
@@ -269,14 +263,12 @@ Reply with ONLY this JSON:
         }
 
         return {
-          team: parsed.team_name || null,
-          detected: parsed.detected_text || text,
           score: Math.round((parsed.score / (prob.points || 100)) * 100),
           feedback: parsed.feedback || 'Graded'
         };
       } catch(e) {
         console.error('Grade error:', e);
-        return { team: null, detected: 'Error', score: 0, feedback: e.message };
+        return { score: 0, feedback: e.message };
       }
     }
 
@@ -570,25 +562,21 @@ Reply with ONLY this JSON:
         ${isFrozenTime() ? '<span class="ml-2 text-blue-400">❄️</span>' : ''}
       </div>`;
       
-      if (myTeam) {
-        const board = calcScoreboard(true);
-        const me = board.find(t => t.name === myTeam);
-        html += `<div class="card mb-4">
-          <div class="flex justify-between items-center">
-            <div><span class="text-gray-400 text-sm">Team</span><span class="block text-lg font-bold text-white">${esc(myTeam)}</span></div>
-            ${me ? `<span class="text-3xl font-bold text-cyan-400">${me.score}</span>` : ''}
-          </div>
-          ${me ? `<div class="mt-3 flex gap-2 flex-wrap">${DATA.problems.map((p,i) => {
+      const board = calcScoreboard(true);
+      const me = myTeam ? board.find(t => t.name === myTeam) : null;
+      html += `<div class="card mb-4">
+        <label class="block text-sm text-gray-400 mb-2">Багийн нэр / Team Name</label>
+        <input type="text" id="team-name" class="input text-lg font-bold"
+               value="${esc(myTeam || '')}" placeholder="Багийнхаа нэрийг бич...">
+        ${me ? `<div class="mt-3 flex items-center justify-between">
+          <div class="flex gap-2 flex-wrap">${DATA.problems.map((p,i) => {
             const r = me.results[p.id] || {status:'none',score:0};
-            const cls = r.status==='pending'?'cell-pending':r.status==='correct'?'cell-correct':r.status==='partial'?'cell-partial':r.status==='wrong'?'cell-wrong':'cell-none';
+            const cls = r.status==='correct'?'cell-correct':r.status==='partial'?'cell-partial':r.status==='wrong'?'cell-wrong':r.status==='pending'?'cell-pending':'cell-none';
             return `<div class="problem-cell ${cls}"><span class="font-bold text-white text-sm">${String.fromCharCode(65+i)}</span><span class="text-xs text-white/70">${r.score||'—'}</span></div>`;
-          }).join('')}</div>` : ''}
-        </div>`;
-      } else {
-        html += `<div class="card mb-4 text-center">
-          <p class="text-gray-400">📝 Write <span class="font-mono text-cyan-400 font-bold">team:YourName</span> on your paper</p>
-        </div>`;
-      }
+          }).join('')}</div>
+          <span class="text-2xl font-bold text-cyan-400">${me.score}pts</span>
+        </div>` : ''}
+      </div>`;
       
       html += `<div class="card">
         <h2 class="font-bold text-white mb-4">Submit Solution</h2>
@@ -810,6 +798,7 @@ Reply with ONLY this JSON:
         });
       });
       
+      document.getElementById('team-name')?.addEventListener('input', updateBtn);
       document.getElementById('sol-upload')?.addEventListener('click', () => document.getElementById('sol-input')?.click());
       
       document.getElementById('sol-input')?.addEventListener('change', e => {
@@ -830,7 +819,8 @@ Reply with ONLY this JSON:
     
     function updateBtn() {
       const btn = document.getElementById('submit-btn');
-      if (btn) btn.disabled = !selectedProb || !solImg;
+      const teamName = document.getElementById('team-name')?.value?.trim();
+      if (btn) btn.disabled = !selectedProb || !solImg || !teamName;
     }
     
     async function doSubmit() {
@@ -843,31 +833,27 @@ Reply with ONLY this JSON:
       result.textContent = 'AI is reading...';
 
       try {
+        const teamName = document.getElementById('team-name')?.value?.trim();
         const prob = DATA.problems.find(p => p.id === selectedProb);
         const res = await gradeWithAI({ img: solImg, imgType: solType }, prob);
 
         if (!DATA.teams) DATA.teams = {};
         if (!DATA.submissions) DATA.submissions = [];
 
-        if (res.team && !DATA.teams[res.team]) DATA.teams[res.team] = { name: res.team };
-        if (res.team) { myTeam = res.team; localStorage.setItem('myteam', res.team); }
+        if (teamName && !DATA.teams[teamName]) DATA.teams[teamName] = { name: teamName };
+        if (teamName) { myTeam = teamName; localStorage.setItem('myteam', teamName); }
 
-        DATA.submissions.push({ id: genId(), probId: selectedProb, time: Date.now(), team: res.team, score: res.score, feedback: res.feedback, status: 'done' });
+        DATA.submissions.push({ id: genId(), probId: selectedProb, time: Date.now(), team: teamName, score: res.score, feedback: res.feedback, status: 'done' });
         saveData();
 
-        if (!res.team) {
-          result.className = 'mt-4 p-4 rounded-lg bg-yellow-900/30 text-yellow-300';
-          result.innerHTML = `<p class="font-bold">⚠️ Баг олдсонгүй</p><p class="text-sm mt-1">${esc(res.feedback)}</p><p class="text-xs mt-2 opacity-70">Цаасан дээрээ "team: Нэр" гэж бичсэн байгаа эсэхийг шалгаарай</p>`;
-        } else {
-          const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
-          result.className = `mt-4 p-4 rounded-lg ${cls}`;
-          result.innerHTML = `<div class="flex justify-between items-center mb-2">
-            <span class="font-bold text-lg">🏷️ ${esc(res.team)}</span>
-            <span class="text-2xl font-bold font-mono">${res.score}/100</span>
-          </div>
-          <p class="text-sm mb-3">${esc(res.feedback)}</p>
-          <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
-        }
+        const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
+        result.className = `mt-4 p-4 rounded-lg ${cls}`;
+        result.innerHTML = `<div class="flex justify-between items-center mb-2">
+          <span class="font-bold text-lg">🏷️ ${esc(teamName)}</span>
+          <span class="text-2xl font-bold font-mono">${res.score}/100</span>
+        </div>
+        <p class="text-sm mb-3">${esc(res.feedback)}</p>
+        <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
 
         selectedProb = null; solImg = null; solType = null;
       } catch(e) {
