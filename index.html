@@ -261,14 +261,18 @@ Reply with ONLY valid JSON. Example: {"selected_answer":"B","score":100,"feedbac
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model: 'llama-3.2-11b-vision-preview',
+              model: 'meta-llama/llama-4-scout-17b-16e-instruct',
               messages: [{ role: 'user', content }],
               max_tokens: 200,
               temperature: 0
             })
           });
 
-          if (!res.ok) throw new Error(`API ${res.status}`);
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            console.error('[Groq error body]', errJson);
+            throw new Error(`API ${res.status}: ${errJson?.error?.message || ''}`);
+          }
           const json = await res.json();
           if (json.error) throw new Error(json.error.message);
 
