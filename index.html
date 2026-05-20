@@ -603,7 +603,7 @@ Reply ONLY with valid JSON, no markdown, no extra text:
           <div class="grid grid-cols-${Math.min(DATA.problems.length, 5)} gap-2">
             ${DATA.problems.map((p,i) => `<button class="prob-select p-3 rounded-lg border-2 border-gray-700 hover:border-cyan-500 text-center" data-id="${p.id}">
               <span class="block text-xl font-bold text-cyan-400">${String.fromCharCode(65+i)}</span>
-              <span class="block text-xs text-gray-400 truncate">${esc(p.name)}</span></button>`).join('')}
+              <span class="block text-xs text-gray-400 truncate">${esc(p.name.replace(/\[[ABCD]\]/i,'').trim())}</span></button>`).join('')}
           </div>
         </div>
         <div id="prob-preview" class="hidden mb-4 p-3 rounded-lg bg-gray-800/50">
