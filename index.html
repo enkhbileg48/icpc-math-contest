@@ -172,7 +172,7 @@
     }
     function hasContest() { return DATA.name && DATA.problems && DATA.problems.length > 0; }
     function hasApiKey() {
-      const k = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GEMINI_API_KEY || '');
+      const k = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GROQ_API_KEY || '');
       return k.length > 10;
     }
     
@@ -222,65 +222,57 @@
         return { success: false, team: null, detected: 'No API key', score: 0, feedback: 'API key not configured' };
       }
 
-      const apiKey = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GEMINI_API_KEY || '');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const apiKey = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GROQ_API_KEY || '');
+      const url = 'https://api.groq.com/openai/v1/chat/completions';
 
       const correctAns = (prob.name.match(/\[([ABCD])\]/i) || [])[1]?.toUpperCase() || null;
-      const cleanName = prob.name.replace(/\[[ABCD]\]/i, '').trim();
 
       const prompt = correctAns
-        ? `You are grading a handwritten exam answer sheet.
+        ? `You are grading a handwritten exam answer sheet. Look at the image carefully.
+The student marked ONE answer by circling, underlining, or writing a letter: A, B, C, or D.
+Identify which letter the student chose.
+Correct answer: "${correctAns}"
+- Student chose "${correctAns}" → score: 100
+- Any other letter or nothing → score: 0
+Reply with ONLY valid JSON. Example: {"selected_answer":"B","score":100,"feedback":"Selected B, correct"}`
+        : `You are grading a handwritten exam answer sheet. Look at the image carefully.
+The student marked ONE answer by circling, underlining, or writing a letter: A, B, C, or D.
+Identify which letter the student chose.
+- Clear letter visible → score: 100
+- Blank or unreadable → score: 0
+Reply with ONLY valid JSON. Example: {"selected_answer":"B","score":100,"feedback":"Selected B"}`;
 
-Look at the image. The student selected ONE answer by circling, underlining, or writing a large letter: A, B, C, or D.
-
-Find which letter the student selected.
-The correct answer is "${correctAns}".
-- If the student selected "${correctAns}" → score is 100
-- Any other letter, or nothing written → score is 0
-
-Respond with ONLY valid JSON, nothing else. Example format:
-{"selected_answer":"B","score":100,"feedback":"Оюутан B дугуйлсан бөгөөд зөв хариулт"}
-
-Now grade this submission:`
-        : `You are grading a handwritten exam answer sheet.
-
-Look at the image. The student selected ONE answer by circling, underlining, or writing a large letter: A, B, C, or D.
-
-Find which letter the student selected.
-- If you can clearly see a letter (A, B, C, or D) → score is 100
-- If blank or impossible to read → score is 0
-
-Respond with ONLY valid JSON, nothing else. Example format:
-{"selected_answer":"B","score":100,"feedback":"Оюутан B дугуйлсан"}
-
-Now grade this submission:`;
-
-      const parts = [{ text: prompt }];
-      if (prob.img) parts.push({ inlineData: { mimeType: prob.imgType, data: prob.img } });
-      parts.push({ inlineData: { mimeType: sub.imgType, data: sub.img } });
+      const content = [{ type: 'text', text: prompt }];
+      if (prob.img) content.push({ type: 'image_url', image_url: { url: `data:${prob.imgType};base64,${prob.img}` } });
+      content.push({ type: 'image_url', image_url: { url: `data:${sub.imgType};base64,${sub.img}` } });
 
       let lastErr = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) {
-          const waitSec = 20 * attempt; // 20s then 40s
+          const waitSec = 15 * attempt;
           for (let i = waitSec; i > 0; i--) {
-            if (onStatus) onStatus(`⏳ API хязгаарт хүрлээ. ${i}с хүлээж байна... (${attempt + 1}/3 оролдлого)`);
+            if (onStatus) onStatus(`⏳ API хязгаарт хүрлээ. ${i}с хүлээж байна... (${attempt + 1}/3)`);
             await new Promise(r => setTimeout(r, 1000));
           }
         }
-        if (onStatus) onStatus(attempt === 0 ? 'AI уншиж байна...' : `🔄 Дахин оролдож байна... (${attempt + 1}/3)`);
+        if (onStatus) onStatus(attempt === 0 ? '🤖 AI уншиж байна...' : `🔄 Дахин оролдож байна... (${attempt + 1}/3)`);
         try {
           const res = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ role: 'user', parts }] })
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: 'llama-3.2-11b-vision-preview',
+              messages: [{ role: 'user', content }],
+              max_tokens: 200,
+              temperature: 0
+            })
           });
 
           if (!res.ok) throw new Error(`API ${res.status}`);
           const json = await res.json();
           if (json.error) throw new Error(json.error.message);
 
-          let text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          let text = json?.choices?.[0]?.message?.content || '';
           if (!text) throw new Error('Empty response');
           text = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
 
@@ -289,7 +281,7 @@ Now grade this submission:`;
           catch(e) {
             const m = text.match(/\{[\s\S]*?\}/);
             if (m) parsed = JSON.parse(m[0]);
-            else throw new Error('Invalid JSON');
+            else throw new Error('Invalid JSON: ' + text.slice(0, 80));
           }
 
           const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
@@ -306,7 +298,7 @@ Now grade this submission:`;
         } catch(e) {
           console.error(`Grade attempt ${attempt + 1} error:`, e);
           lastErr = e;
-          if (!e.message.includes('429')) break;
+          if (!e.message.includes('429') && !e.message.includes('rate')) break;
         }
       }
       return { success: false, team: null, detected: 'Error', score: 0, feedback: lastErr?.message || 'Unknown error' };
@@ -393,9 +385,9 @@ Now grade this submission:`;
       
       // API Key (stored in Firebase)
       html += `<div class="card bg-purple-900/20 border-purple-700/50 mb-6">
-        <h2 class="text-lg font-bold text-purple-400 mb-4">🔑 Gemini API Key</h2>
-        <input type="password" id="cfg-apikey" class="input" value="${esc(DATA.apiKey || '')}" placeholder="Enter Gemini API Key">
-        <p class="text-xs text-gray-500 mt-1">Get free at <a href="https://aistudio.google.com/apikey" target="_blank" class="text-cyan-400 hover:underline">aistudio.google.com</a></p>
+        <h2 class="text-lg font-bold text-purple-400 mb-4">🔑 Groq API Key</h2>
+        <input type="password" id="cfg-apikey" class="input" value="${esc(DATA.apiKey || '')}" placeholder="gsk_...">
+        <p class="text-xs text-gray-500 mt-1">Үнэгүй авах: <a href="https://console.groq.com/keys" target="_blank" class="text-cyan-400 hover:underline">console.groq.com/keys</a></p>
         <button id="save-apikey" class="btn btn-secondary w-full mt-3">💾 Save API Key</button>
       </div>`;
       

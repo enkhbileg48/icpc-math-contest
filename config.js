@@ -2,7 +2,7 @@
 // Keep this file private - do not share!
 
 const CONFIG = {
-  GEMINI_API_KEY: 'AIzaSyA7pri-wEtu7Xa4RoYgZjyi4kMoa6OwSJU',
+  GROQ_API_KEY: '',
   ADMIN_SECRET: 'admin2025',
   JUDGE_SECRET: 'judge2025'
 };
