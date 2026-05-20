@@ -224,30 +224,23 @@
       const correctAns = (prob.name.match(/\[([ABCD])\]/i) || [])[1]?.toUpperCase() || null;
       const cleanName = prob.name.replace(/\[[ABCD]\]/i, '').trim();
 
-      const prompt = `You are grading a multiple choice Computer Vision / Pattern Recognition test.
+      const prompt = correctAns
+        ? `Look at this handwritten answer paper image.
 
-PROBLEM: "${cleanName}"
-${prob.img ? 'The first image shows the question with options A, B, C, D.' : ''}
-Student answer sheet is in the last image.
+1. Find "team:" written on the paper. Return exactly what comes after it. If missing, return null.
+2. Find which letter (A, B, C, or D) the student wrote, circled, or underlined. Return just that letter.
+3. Correct answer is ${correctAns}. If student wrote ${correctAns} → score=${prob.points}. Otherwise → score=0.
 
-TASK 1 — TEAM NAME:
-Find "team:" written on the paper. Return the name after it. If not found, return null.
+Return ONLY this JSON, nothing else:
+{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"one sentence"}`
+        : `Look at this handwritten answer paper image.
 
-TASK 2 — STUDENT'S SELECTED ANSWER:
-Look for which option (A, B, C, or D) the student wrote, circled, checked, or marked clearly.
-Return just the single letter. If unclear, return null.
+1. Find "team:" written on the paper. Return exactly what comes after it. If missing, return null.
+2. Find which letter (A, B, C, or D) the student wrote, circled, or underlined. Return just that letter.
+3. If student clearly wrote any letter → score=${prob.points}. If blank → score=0.
 
-TASK 3 — SCORE (${prob.points} points):
-${correctAns
-  ? `Correct answer is: ${correctAns}
-- Student chose ${correctAns} → ${prob.points} points (correct)
-- Student chose anything else → 0 points (wrong)`
-  : `Compare student answer with the correct option visible in the problem image.
-- Correct → ${prob.points} points
-- Wrong or blank → 0 points`}
-
-Reply ONLY with valid JSON, no markdown, no extra text:
-{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"SHORT_COMMENT"}`;
+Return ONLY this JSON, nothing else:
+{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"one sentence"}`;
 
       try {
         const parts = [{ text: prompt }];
