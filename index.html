@@ -857,14 +857,16 @@ Reply with ONLY this JSON:
 
         if (!res.team) {
           result.className = 'mt-4 p-4 rounded-lg bg-yellow-900/30 text-yellow-300';
-          result.innerHTML = `<p class="font-bold">⚠️ Team not detected</p><p class="text-sm mt-1">${esc(res.feedback)}</p>`;
+          result.innerHTML = `<p class="font-bold">⚠️ Баг олдсонгүй</p><p class="text-sm mt-1">${esc(res.feedback)}</p><p class="text-xs mt-2 opacity-70">Цаасан дээрээ "team: Нэр" гэж бичсэн байгаа эсэхийг шалгаарай</p>`;
         } else {
           const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
           result.className = `mt-4 p-4 rounded-lg ${cls}`;
-          result.innerHTML = `<div class="flex justify-between items-center">
-            <span class="font-bold">Team: ${esc(res.team)}</span>
-            <span class="text-2xl font-bold">${res.score}/100</span>
-          </div><p class="text-sm mt-1">${esc(res.feedback)}</p>`;
+          result.innerHTML = `<div class="flex justify-between items-center mb-2">
+            <span class="font-bold text-lg">🏷️ ${esc(res.team)}</span>
+            <span class="text-2xl font-bold font-mono">${res.score}/100</span>
+          </div>
+          <p class="text-sm mb-3">${esc(res.feedback)}</p>
+          <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
         }
 
         selectedProb = null; solImg = null; solType = null;
