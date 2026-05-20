@@ -255,49 +255,54 @@ Respond with ONLY valid JSON, nothing else. Example format:
 
 Now grade this submission:`;
 
-      try {
-        const parts = [{ text: prompt }];
-        if (prob.img) parts.push({ inlineData: { mimeType: prob.imgType, data: prob.img } });
-        parts.push({ inlineData: { mimeType: sub.imgType, data: sub.img } });
+      const parts = [{ text: prompt }];
+      if (prob.img) parts.push({ inlineData: { mimeType: prob.imgType, data: prob.img } });
+      parts.push({ inlineData: { mimeType: sub.imgType, data: sub.img } });
 
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ role: 'user', parts }] })
-        });
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt));
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts }] })
+          });
 
-        if (!res.ok) throw new Error(`API ${res.status}`);
-        const json = await res.json();
-        if (json.error) throw new Error(json.error.message);
+          if (!res.ok) throw new Error(`API ${res.status}`);
+          const json = await res.json();
+          if (json.error) throw new Error(json.error.message);
 
-        let text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        if (!text) throw new Error('Empty response');
-        text = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+          let text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          if (!text) throw new Error('Empty response');
+          text = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
 
-        let parsed;
-        try { parsed = JSON.parse(text); }
-        catch(e) {
-          const m = text.match(/\{[\s\S]*?\}/);
-          if (m) parsed = JSON.parse(m[0]);
-          else throw new Error('Invalid JSON');
+          let parsed;
+          try { parsed = JSON.parse(text); }
+          catch(e) {
+            const m = text.match(/\{[\s\S]*?\}/);
+            if (m) parsed = JSON.parse(m[0]);
+            else throw new Error('Invalid JSON');
+          }
+
+          const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
+          const selected = (parsed.selected_answer || '').toString().trim().toUpperCase().replace(/[^ABCD]/g, '') || null;
+          const normalizedScore = rawScore <= 0 ? 0 : rawScore <= 1 ? 100 : Math.min(100, rawScore);
+          console.log('[Grade] parsed:', parsed, '→ score:', normalizedScore, 'selected:', selected);
+          return {
+            success: true,
+            team: parsed.team_name || null,
+            detected: selected ? `Сонгосон: ${selected}` : 'Хариу тодорхойгүй',
+            score: normalizedScore,
+            feedback: parsed.feedback || 'Graded'
+          };
+        } catch(e) {
+          console.error(`Grade attempt ${attempt + 1} error:`, e);
+          lastErr = e;
+          if (!e.message.includes('429')) break;
         }
-
-        const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
-        const selected = (parsed.selected_answer || '').toString().trim().toUpperCase().replace(/[^ABCD]/g, '') || null;
-        // Handle binary (0/1) or percentage (0-100) scores from Gemini
-        const normalizedScore = rawScore <= 0 ? 0 : rawScore <= 1 ? 100 : Math.min(100, rawScore);
-        console.log('[Grade] raw Gemini text:', text);
-        console.log('[Grade] parsed:', parsed, '→ score:', normalizedScore, 'selected:', selected);
-        return {
-          team: parsed.team_name || null,
-          detected: selected ? `Сонгосон: ${selected}` : 'Хариу тодорхойгүй',
-          score: normalizedScore,
-          feedback: parsed.feedback || 'Graded'
-        };
-      } catch(e) {
-        console.error('Grade error:', e);
-        return { team: null, detected: 'Error', score: 0, feedback: e.message };
       }
+      return { success: false, team: null, detected: 'Error', score: 0, feedback: lastErr?.message || 'Unknown error' };
     }
 
     function renderStatus() {
@@ -863,6 +868,16 @@ Now grade this submission:`;
       try {
         const prob = DATA.problems.find(p => p.id === selectedProb);
         const res = await gradeWithAI({ img: solImg, imgType: solType }, prob);
+
+        if (!res.success) {
+          const is429 = (res.feedback || '').includes('429');
+          result.className = 'mt-4 p-4 rounded-lg bg-red-900/30 text-red-300';
+          result.innerHTML = `<p class="font-bold">❌ ${is429 ? 'API хязгаарт хүрлээ (Rate limit)' : 'Алдаа гарлаа'}</p>
+            <p class="text-sm mt-1">${esc(is429 ? 'Хэдэн секунд хүлээгээд дахин оролдоно уу.' : res.feedback)}</p>`;
+          btn.textContent = '📤 Submit';
+          updateBtn();
+          return;
+        }
 
         if (!DATA.teams) DATA.teams = {};
         if (!DATA.submissions) DATA.submissions = [];
