@@ -221,27 +221,33 @@
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${DATA.apiKey}`;
 
-      const prompt = `You are a LENIENT and ENCOURAGING math competition grader.
+      const correctAns = (prob.name.match(/\[([ABCD])\]/i) || [])[1]?.toUpperCase() || null;
+      const cleanName = prob.name.replace(/\[[ABCD]\]/i, '').trim();
 
-STEP 1 - FIND TEAM NAME:
-Look for "team:" or "Team:" written anywhere on the paper.
-Return exactly what is written after it (e.g. "Alpha", "Team1").
-If you cannot find it, return null.
+      const prompt = `You are grading a multiple choice Computer Vision / Pattern Recognition test.
 
-STEP 2 - READ THE WORK:
-Briefly describe what is written or shown on the paper.
+PROBLEM: "${cleanName}"
+${prob.img ? 'The first image shows the question with options A, B, C, D.' : ''}
+Student answer sheet is in the last image.
 
-STEP 3 - GRADE GENEROUSLY (problem: "${prob.name}", max: ${prob.points} points):
-${prob.img ? 'The first image shows the original problem — compare student answer to it.' : 'Grade the mathematical work shown.'}
-- Correct answer → ${prob.points} points
-- Mostly correct, minor error → ${Math.round(prob.points * 0.85)} points
-- Partial work, right direction → ${Math.round(prob.points * 0.5)} points
-- Any meaningful attempt → ${Math.round(prob.points * 0.25)} points
-- Blank or completely wrong → 0 points
-IMPORTANT: Be generous. When in doubt, give MORE points.
+TASK 1 — TEAM NAME:
+Find "team:" written on the paper. Return the name after it. If not found, return null.
 
-Reply with ONLY valid JSON, no markdown:
-{"team_name":NAME_OR_NULL,"detected_text":"BRIEF_DESCRIPTION","score":NUMBER_0_TO_${prob.points},"feedback":"SHORT_ENCOURAGING_COMMENT"}`;
+TASK 2 — STUDENT'S SELECTED ANSWER:
+Look for which option (A, B, C, or D) the student wrote, circled, checked, or marked clearly.
+Return just the single letter. If unclear, return null.
+
+TASK 3 — SCORE (${prob.points} points):
+${correctAns
+  ? `Correct answer is: ${correctAns}
+- Student chose ${correctAns} → ${prob.points} points (correct)
+- Student chose anything else → 0 points (wrong)`
+  : `Compare student answer with the correct option visible in the problem image.
+- Correct → ${prob.points} points
+- Wrong or blank → 0 points`}
+
+Reply ONLY with valid JSON, no markdown, no extra text:
+{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"SHORT_COMMENT"}`;
 
       try {
         const parts = [{ text: prompt }];
@@ -271,9 +277,10 @@ Reply with ONLY valid JSON, no markdown:
         }
 
         const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
+        const selected = parsed.selected_answer || null;
         return {
           team: parsed.team_name || null,
-          detected: parsed.detected_text || '',
+          detected: selected ? `Сонгосон: ${selected}` : 'Хариу тодорхойгүй',
           score: Math.min(100, Math.round((rawScore / (prob.points || 100)) * 100)),
           feedback: parsed.feedback || 'Graded'
         };
