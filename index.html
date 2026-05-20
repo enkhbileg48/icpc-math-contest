@@ -221,19 +221,27 @@
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${DATA.apiKey}`;
 
-      const prompt = `You are a LENIENT math grader for a student competition. Be encouraging!
+      const prompt = `You are a LENIENT and ENCOURAGING math competition grader.
 
-Grade the handwritten solution image:
-${prob.img ? '- The first image is the original problem. Compare the student answer to it.' : '- Grade the math shown in the image.'}
-- Maximum score: ${prob.points} points
-- Full marks for correct answer
-- 70-90% for minor errors
-- 40-60% for partial work shown
-- 20-30% for any meaningful attempt
-- 0 only if completely blank or nonsense
+STEP 1 - FIND TEAM NAME:
+Look for "team:" or "Team:" written anywhere on the paper.
+Return exactly what is written after it (e.g. "Alpha", "Team1").
+If you cannot find it, return null.
 
-Reply with ONLY this JSON (no extra text):
-{"score":NUMBER,"feedback":"SHORT_ENCOURAGING_COMMENT"}`;
+STEP 2 - READ THE WORK:
+Briefly describe what is written or shown on the paper.
+
+STEP 3 - GRADE GENEROUSLY (problem: "${prob.name}", max: ${prob.points} points):
+${prob.img ? 'The first image shows the original problem — compare student answer to it.' : 'Grade the mathematical work shown.'}
+- Correct answer → ${prob.points} points
+- Mostly correct, minor error → ${Math.round(prob.points * 0.85)} points
+- Partial work, right direction → ${Math.round(prob.points * 0.5)} points
+- Any meaningful attempt → ${Math.round(prob.points * 0.25)} points
+- Blank or completely wrong → 0 points
+IMPORTANT: Be generous. When in doubt, give MORE points.
+
+Reply with ONLY valid JSON, no markdown:
+{"team_name":NAME_OR_NULL,"detected_text":"BRIEF_DESCRIPTION","score":NUMBER_0_TO_${prob.points},"feedback":"SHORT_ENCOURAGING_COMMENT"}`;
 
       try {
         const parts = [{ text: prompt }];
@@ -262,13 +270,16 @@ Reply with ONLY this JSON (no extra text):
           else throw new Error('Invalid JSON');
         }
 
+        const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
         return {
-          score: Math.round((parsed.score / (prob.points || 100)) * 100),
+          team: parsed.team_name || null,
+          detected: parsed.detected_text || '',
+          score: Math.min(100, Math.round((rawScore / (prob.points || 100)) * 100)),
           feedback: parsed.feedback || 'Graded'
         };
       } catch(e) {
         console.error('Grade error:', e);
-        return { score: 0, feedback: e.message };
+        return { team: null, detected: 'Error', score: 0, feedback: e.message };
       }
     }
 
@@ -833,27 +844,34 @@ Reply with ONLY this JSON (no extra text):
       result.textContent = 'AI is reading...';
 
       try {
-        const teamName = document.getElementById('team-name')?.value?.trim();
         const prob = DATA.problems.find(p => p.id === selectedProb);
         const res = await gradeWithAI({ img: solImg, imgType: solType }, prob);
 
         if (!DATA.teams) DATA.teams = {};
         if (!DATA.submissions) DATA.submissions = [];
 
+        const teamName = res.team || myTeam || null;
         if (teamName && !DATA.teams[teamName]) DATA.teams[teamName] = { name: teamName };
         if (teamName) { myTeam = teamName; localStorage.setItem('myteam', teamName); }
 
         DATA.submissions.push({ id: genId(), probId: selectedProb, time: Date.now(), team: teamName, score: res.score, feedback: res.feedback, status: 'done' });
         saveData();
 
-        const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
-        result.className = `mt-4 p-4 rounded-lg ${cls}`;
-        result.innerHTML = `<div class="flex justify-between items-center mb-2">
-          <span class="font-bold text-lg">🏷️ ${esc(teamName)}</span>
-          <span class="text-2xl font-bold font-mono">${res.score}/100</span>
-        </div>
-        <p class="text-sm mb-3">${esc(res.feedback)}</p>
-        <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
+        if (!teamName) {
+          result.className = 'mt-4 p-4 rounded-lg bg-yellow-900/30 text-yellow-300';
+          result.innerHTML = `<p class="font-bold">⚠️ Баг олдсонгүй</p>
+            <p class="text-sm mt-1">${esc(res.feedback)}</p>
+            <p class="text-xs mt-2 opacity-70">Цаасан дээрээ "team: Нэр" гэж тодоор бичнэ үү</p>`;
+        } else {
+          const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
+          result.className = `mt-4 p-4 rounded-lg ${cls}`;
+          result.innerHTML = `<div class="flex justify-between items-center mb-2">
+            <span class="font-bold text-lg">🏷️ ${esc(teamName)}</span>
+            <span class="text-2xl font-bold font-mono">${res.score}/100</span>
+          </div>
+          <p class="text-sm mb-3">${esc(res.feedback)}</p>
+          <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
+        }
 
         selectedProb = null; solImg = null; solType = null;
       } catch(e) {
