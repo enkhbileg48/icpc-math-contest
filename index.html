@@ -225,22 +225,25 @@
       const cleanName = prob.name.replace(/\[[ABCD]\]/i, '').trim();
 
       const prompt = correctAns
-        ? `Look at this handwritten answer paper image.
+        ? `Look at this handwritten answer image. The student circled or wrote one letter: A, B, C, or D.
 
-1. Find "team:" written on the paper. Return exactly what comes after it. If missing, return null.
-2. Find which letter (A, B, C, or D) the student wrote, circled, or underlined. Return just that letter.
-3. Correct answer is ${correctAns}. If student wrote ${correctAns} → score=${prob.points}. Otherwise → score=0.
+Find the letter the student selected. Look for a circled letter, underlined letter, or a large single letter written as the answer.
 
-Return ONLY this JSON, nothing else:
-{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"one sentence"}`
-        : `Look at this handwritten answer paper image.
+Correct answer is ${correctAns}.
+- If student selected ${correctAns}: score = 100
+- Any other letter or blank: score = 0
 
-1. Find "team:" written on the paper. Return exactly what comes after it. If missing, return null.
-2. Find which letter (A, B, C, or D) the student wrote, circled, or underlined. Return just that letter.
-3. If student clearly wrote any letter → score=${prob.points}. If blank → score=0.
+Respond with ONLY this JSON (no markdown, no extra text):
+{"selected_answer":"LETTER_OR_NULL","score":100_OR_0,"feedback":"one sentence in Mongolian or English"}`
+        : `Look at this handwritten answer image. The student circled or wrote one letter: A, B, C, or D.
 
-Return ONLY this JSON, nothing else:
-{"team_name":NAME_OR_NULL,"selected_answer":"LETTER_OR_NULL","score":NUMBER,"feedback":"one sentence"}`;
+Find the letter the student selected. Look for a circled letter, underlined letter, or a large single letter written as the answer.
+
+- If student clearly selected a letter: score = 100
+- If blank or completely illegible: score = 0
+
+Respond with ONLY this JSON (no markdown, no extra text):
+{"selected_answer":"LETTER_OR_NULL","score":100_OR_0,"feedback":"one sentence in Mongolian or English"}`;
 
       try {
         const parts = [{ text: prompt }];
@@ -271,10 +274,12 @@ Return ONLY this JSON, nothing else:
 
         const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
         const selected = parsed.selected_answer || null;
+        // Handle binary (0/1) or percentage (0-100) scores from Gemini
+        const normalizedScore = rawScore <= 0 ? 0 : rawScore <= 1 ? 100 : Math.min(100, rawScore);
         return {
           team: parsed.team_name || null,
           detected: selected ? `Сонгосон: ${selected}` : 'Хариу тодорхойгүй',
-          score: Math.min(100, Math.round((rawScore / (prob.points || 100)) * 100)),
+          score: normalizedScore,
           feedback: parsed.feedback || 'Graded'
         };
       } catch(e) {
@@ -850,7 +855,8 @@ Return ONLY this JSON, nothing else:
         if (!DATA.teams) DATA.teams = {};
         if (!DATA.submissions) DATA.submissions = [];
 
-        const teamName = res.team || myTeam || null;
+        const inputTeam = document.getElementById('team-name')?.value?.trim() || null;
+        const teamName = inputTeam || res.team || myTeam || null;
         if (teamName && !DATA.teams[teamName]) DATA.teams[teamName] = { name: teamName };
         if (teamName) { myTeam = teamName; localStorage.setItem('myteam', teamName); }
 
