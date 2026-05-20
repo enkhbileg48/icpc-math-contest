@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICPC Math Contest</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="config.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Space Grotesk', sans-serif; background: #0a0a0f; color: #f1f5f9; min-height: 100vh; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .font-display { font-family: 'Orbitron', sans-serif; }
+    .bg-grid { background-image: linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px); background-size: 50px 50px; }
+    .card { background: #12121a; border: 1px solid rgba(59,130,246,0.2); border-radius: 1rem; padding: 1.5rem; margin-bottom: 1rem; }
+    .input { background: #1a1a25; border: 1px solid rgba(59,130,246,0.3); color: #f1f5f9; padding: 0.75rem 1rem; border-radius: 0.5rem; width: 100%; }
+    .input:focus { outline: none; border-color: #06b6d4; }
+    .btn { padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-block; text-align: center; text-decoration: none; }
+    .btn-primary { background: linear-gradient(135deg, #3b82f6, #06b6d4); color: white; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(59,130,246,0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-secondary { background: #374151; color: white; }
+    .btn-secondary:hover { background: #4b5563; }
+    .btn-success { background: #16a34a; color: white; }
+    .btn-success:hover { background: #15803d; }
+    .btn-warning { background: #ca8a04; color: white; }
+    .btn-warning:hover { background: #a16207; }
+    .btn-large { padding: 1.25rem 2.5rem; font-size: 1.25rem; }
+    .problem-cell { min-width: 60px; min-height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 0.5rem; }
+    .cell-none { background: rgba(55,65,81,0.3); }
+    .cell-pending { background: linear-gradient(135deg, #1e3a5f, #1e40af); animation: pulse 2s infinite; }
+    .cell-wrong { background: linear-gradient(135deg, #7f1d1d, #b91c1c); }
+    .cell-partial { background: linear-gradient(135deg, #713f12, #ca8a04); }
+    .cell-correct { background: linear-gradient(135deg, #14532d, #16a34a); }
+    .cell-frozen { background: linear-gradient(135deg, #1e3a5f, #3b82f6); }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
+    .upload-zone { border: 2px dashed rgba(59,130,246,0.3); background: rgba(30,58,95,0.1); border-radius: 0.75rem; padding: 1.5rem; text-align: center; cursor: pointer; }
+    .upload-zone:hover { border-color: #06b6d4; background: rgba(6,182,212,0.1); }
+    .rank-1 { color: #ffd700; }
+    .rank-2 { color: #c0c0c0; }
+    .rank-3 { color: #cd7f32; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .status-online { background: #22c55e; }
+    .status-offline { background: #ef4444; }
+  </style>
+</head>
+<body class="bg-grid">
+  <div id="app"><div class="min-h-screen flex items-center justify-center"><p class="text-gray-400">Loading...</p></div></div>
+  
+  <script>
+    // ============================================================
+    // CONFIGURATION - CHANGE THESE VALUES
+    // ============================================================
+    
+    const ADMIN_SECRET = CONFIG.ADMIN_SECRET;
+    const JUDGE_SECRET = CONFIG.JUDGE_SECRET;
+    
+    // Firebase Config - PASTE YOUR CONFIG HERE
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+    const firebaseConfig = {
+      apiKey: "AIzaSyCn4CJt2EAQNw6k3ui2r0VFuedAACHV3Jk",
+      authDomain: "mathforces-48499.firebaseapp.com",
+      databaseURL: "https://mathforces-48499-default-rtdb.firebaseio.com",
+      projectId: "mathforces-48499",
+      storageBucket: "mathforces-48499.firebasestorage.app",
+      messagingSenderId: "965288991800",
+      appId: "1:965288991800:web:bca4e04dee8a63acc5dacd",
+      measurementId: "G-C8BGRXFYH8"
+    };
+    
+    // ============================================================
+    
+    let db = null;
+    let firebaseReady = false;
+    let isOnline = false;
+    let dataLoaded = false;
+    
+    const DEFAULT_DATA = {
+      name: '', startTime: null, duration: 180, freezeTime: 30, partialCredit: true,
+      problems: [], teams: {}, submissions: [], apiKey: ''
+    };
+    
+    let DATA = { ...DEFAULT_DATA };
+    let myTeam = localStorage.getItem('myteam') || null;
+    let revealHistory = [];
+
+    // Initialize Firebase
+    function initFirebase() {
+      if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+        console.warn("Firebase not configured");
+        dataLoaded = true;
+        render();
+        return;
+      }
+      try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        firebaseReady = true;
+        
+        // Listen for data changes
+        db.ref('contest').on('value', (snapshot) => {
+          const val = snapshot.val();
+          if (val) {
+            DATA = { ...DEFAULT_DATA, ...val };
+            if (!Array.isArray(DATA.problems)) DATA.problems = [];
+            if (!Array.isArray(DATA.submissions)) DATA.submissions = [];
+            if (!DATA.teams) DATA.teams = {};
+          }
+          dataLoaded = true;
+          render();
+        });
+        
+        // Connection state
+        db.ref('.info/connected').on('value', (snap) => {
+          isOnline = snap.val() === true;
+          if (dataLoaded) render();
+        });
+        
+      } catch(e) {
+        console.error("Firebase error:", e);
+        dataLoaded = true;
+        render();
+      }
+    }
+    
+    function saveData() {
+      if (firebaseReady && db) {
+        db.ref('contest').set(DATA);
+      }
+    }
+    
+    function getMode() {
+      const p = new URLSearchParams(location.search);
+      if (p.get('admin') === ADMIN_SECRET) return 'admin';
+      if (p.get('judge') === JUDGE_SECRET) return 'judge';
+      if (p.has('submit')) return 'submit';
+      if (p.has('board')) return 'board';
+      return 'home';
+    }
+    
+    function genId() { return Math.random().toString(36).slice(2, 10); }
+    function esc(s) { return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    
+    function fmtTime(s) {
+      if (s < 0) s = 0;
+      const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
+      return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+    }
+    
+    function fmtDateTime(ts) { return new Date(ts).toLocaleTimeString(); }
+    
+    function contestStarted() { return DATA.startTime && Date.now() >= new Date(DATA.startTime).getTime(); }
+    function contestEnded() {
+      if (!DATA.startTime) return false;
+      return (Date.now() - new Date(DATA.startTime).getTime()) / 1000 >= DATA.duration * 60;
+    }
+    function getRemaining() {
+      if (!DATA.startTime) return 0;
+      return Math.max(0, DATA.duration * 60 - (Date.now() - new Date(DATA.startTime).getTime()) / 1000);
+    }
+    function isFrozenTime() {
+      const rem = getRemaining();
+      return rem > 0 && rem <= DATA.freezeTime * 60 && contestStarted();
+    }
+    function hasContest() { return DATA.name && DATA.problems && DATA.problems.length > 0; }
+    function hasApiKey() { return DATA.apiKey && DATA.apiKey.length > 10; }
+    
+    function getFrozenSubmissions() {
+      if (!DATA.startTime || !DATA.submissions) return [];
+      const startMs = new Date(DATA.startTime).getTime();
+      const freezeAt = (DATA.duration - DATA.freezeTime) * 60 * 1000;
+      return DATA.submissions.filter(s => (s.time - startMs) >= freezeAt && s.status === 'done').sort((a, b) => a.time - b.time);
+    }
+    
+    function getRevealedSubmissions() {
+      if (!DATA.submissions) return [];
+      return DATA.submissions.filter(s => s.status === 'revealed').sort((a, b) => a.time - b.time);
+    }
+
+    function calcScoreboard(showHidden = false) {
+      if (!DATA.startTime || !DATA.problems || !DATA.submissions) return [];
+      const startMs = new Date(DATA.startTime).getTime();
+      const freezeAt = (DATA.duration - DATA.freezeTime) * 60;
+      
+      return Object.values(DATA.teams || {}).map(team => {
+        let score = 0, time = 0, results = {};
+        DATA.problems.forEach(prob => {
+          const subs = DATA.submissions.filter(s => s.team === team.name && s.probId === prob.id).sort((a,b) => a.time - b.time);
+          let best = 0, tries = 0, solveAt = 0, pending = false, frozen = 0;
+          subs.forEach(sub => {
+            const subSec = (sub.time - startMs) / 1000;
+            const inFreeze = subSec >= freezeAt;
+            if (sub.status === 'pending') pending = true;
+            else if (inFreeze && sub.status === 'done' && !showHidden) frozen++;
+            else if (sub.status === 'done' || sub.status === 'revealed') {
+              tries++;
+              if (sub.score > best) { best = sub.score; solveAt = subSec; }
+            }
+          });
+          results[prob.id] = { score: best, tries, solveAt, pending, frozen,
+            status: pending ? 'pending' : frozen > 0 ? 'frozen' : best === 100 ? 'correct' : best > 0 ? 'partial' : tries > 0 ? 'wrong' : 'none' };
+          score += best;
+          if (best > 0) time += solveAt + (tries - 1) * 1200;
+        });
+        return { name: team.name, score, time, results, solved: Object.values(results).filter(r => r.score === 100).length };
+      }).sort((a,b) => b.score !== a.score ? b.score - a.score : a.time - b.time);
+    }
+
+    async function gradeWithAI(sub, prob) {
+      if (!hasApiKey()) {
+        return { team: null, detected: 'No API key', score: 0, feedback: 'API key not configured' };
+      }
+      
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${DATA.apiKey}`;
+      
+      const prompt = `You are a LENIENT math grader. Be encouraging!
+
+TASK 1 - Find team name:
+Look for "team:" or "Team:" on the paper. Return whatever comes after it.
+
+TASK 2 - Read the student's work:
+Transcribe what you see written.
+
+TASK 3 - Grade LENIENTLY:
+${prob.img ? '- Compare to problem in first image' : '- Grade the math shown'}
+- Max: ${prob.points} points
+- Full marks for correct answer
+- 70-90% for small errors
+- 40-60% for partial work
+- 20-30% for any attempt
+- 0 only if blank/nonsense
+
+Reply with ONLY this JSON:
+{"team_name":"NAME","detected_text":"WHAT_YOU_SEE","score":NUMBER,"feedback":"COMMENT"}`;
+
+      try {
+        const parts = [{ text: prompt }];
+        if (prob.img) parts.push({ inlineData: { mimeType: prob.imgType, data: prob.img } });
+        parts.push({ inlineData: { mimeType: sub.imgType, data: sub.img } });
+        
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts }] })
+        });
+        
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const json = await res.json();
+        if (json.error) throw new Error(json.error.message);
+        
+        let text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (!text) throw new Error('Empty response');
+        text = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+        
+        let parsed;
+        try { parsed = JSON.parse(text); }
+        catch(e) {
+          const m = text.match(/\{[\s\S]*?\}/);
+          if (m) parsed = JSON.parse(m[0]);
+          else throw new Error('Invalid JSON');
+        }
+        
+        return {
+          team: parsed.team_name || null,
+          detected: parsed.detected_text || text,
+          score: Math.round((parsed.score / (prob.points || 100)) * 100),
+          feedback: parsed.feedback || 'Graded'
+        };
+      } catch(e) {
+        console.error('Grade error:', e);
+        return { team: null, detected: 'Error', score: 0, feedback: e.message };
+      }
+    }
+
+    function renderStatus() {
+      if (!firebaseReady) return `<div class="text-yellow-400 text-sm mb-4 text-center">⚠️ Firebase not configured</div>`;
+      return `<div class="text-sm mb-4 text-center"><span class="status-dot ${isOnline ? 'status-online' : 'status-offline'}"></span>${isOnline ? 'Connected' : 'Connecting...'}</div>`;
+    }
+
+    function render() {
+      if (!dataLoaded) return;
+      const app = document.getElementById('app');
+      const mode = getMode();
+      if (mode === 'admin') app.innerHTML = renderAdmin();
+      else if (mode === 'submit') app.innerHTML = renderSubmit();
+      else if (mode === 'board') app.innerHTML = renderBoard();
+      else if (mode === 'judge') app.innerHTML = renderJudge();
+      else app.innerHTML = renderHome();
+      bindEvents();
+    }
+
+    function renderHome() {
+      let html = `<div class="min-h-screen flex items-center justify-center p-6">
+        <div class="max-w-md w-full text-center">
+          <h1 class="font-display text-4xl text-cyan-400 mb-2">ICPC Math</h1>
+          <p class="text-gray-400 mb-4">AI-Powered Competition</p>
+          ${renderStatus()}`;
+      
+      if (!firebaseReady) {
+        html += `<div class="card bg-yellow-900/20 border-yellow-700/50">
+          <p class="text-yellow-400 font-bold mb-2">⚠️ Setup Required</p>
+          <p class="text-gray-400 text-sm">Firebase config needed in HTML file</p>
+        </div>`;
+      } else if (hasContest()) {
+        html += `<div class="card text-left mb-6">
+          <h2 class="text-xl font-bold text-white mb-2">${esc(DATA.name)}</h2>
+          <p class="text-gray-400 text-sm mb-3">${DATA.problems.length} problems • ${DATA.duration} min</p>`;
+        
+        if (contestEnded()) {
+          html += `<div class="p-3 rounded-lg bg-red-900/30 text-red-400 text-center font-bold">🏁 Contest Ended</div>`;
+        } else if (contestStarted()) {
+          html += `<div class="p-3 rounded-lg bg-green-900/30 text-green-400 text-center">
+            <span class="font-bold">🟢 Running</span><br>
+            <span class="font-mono text-xl" id="timer">${fmtTime(getRemaining())}</span>
+          </div>`;
+        } else {
+          html += `<div class="p-3 rounded-lg bg-yellow-900/30 text-yellow-400 text-center">
+            <span class="font-bold">⏳ Starts</span><br>
+            <span class="text-white">${new Date(DATA.startTime).toLocaleString()}</span>
+          </div>`;
+        }
+        html += `</div><div class="space-y-3">`;
+        if (!contestEnded()) html += `<a href="?submit" class="btn btn-primary btn-large block w-full">🚀 Enter Contest</a>`;
+        html += `<a href="?board" class="btn btn-secondary block w-full">📊 Scoreboard</a></div>`;
+      } else {
+        html += `<p class="text-gray-500 mb-4">No contest scheduled</p><p class="text-gray-600 text-sm">Check back later!</p>`;
+      }
+      
+      return html + `</div></div>`;
+    }
+
+    function renderAdmin() {
+      const base = location.origin + location.pathname;
+      
+      let html = `<div class="min-h-screen p-4 sm:p-6"><div class="max-w-2xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="font-display text-2xl text-cyan-400">⚙️ Admin</h1>
+          <a href="?" class="text-gray-400 hover:text-white">← Home</a>
+        </div>
+        ${renderStatus()}`;
+      
+      if (!firebaseReady) {
+        html += `<div class="card bg-red-900/20 border-red-700/50 mb-6">
+          <h2 class="text-lg font-bold text-red-400 mb-4">🔥 Firebase Setup Required</h2>
+          <ol class="text-gray-400 text-sm space-y-2 list-decimal list-inside">
+            <li>Go to <a href="https://console.firebase.google.com" target="_blank" class="text-cyan-400 hover:underline">Firebase Console</a></li>
+            <li>Create project → Realtime Database → Create (test mode)</li>
+            <li>Project Settings → Your apps → Add web app</li>
+            <li>Copy firebaseConfig → Paste in HTML file</li>
+          </ol>
+        </div>`;
+      }
+      
+      // API Key (stored in Firebase)
+      html += `<div class="card bg-purple-900/20 border-purple-700/50 mb-6">
+        <h2 class="text-lg font-bold text-purple-400 mb-4">🔑 Gemini API Key</h2>
+        <input type="password" id="cfg-apikey" class="input" value="${esc(DATA.apiKey || '')}" placeholder="Enter Gemini API Key">
+        <p class="text-xs text-gray-500 mt-1">Get free at <a href="https://aistudio.google.com/apikey" target="_blank" class="text-cyan-400 hover:underline">aistudio.google.com</a></p>
+        <button id="save-apikey" class="btn btn-secondary w-full mt-3">💾 Save API Key</button>
+      </div>`;
+      
+      if (hasContest()) {
+        html += `<div class="card bg-red-900/20 border-red-700/50 mb-6">
+          <div class="flex justify-between items-center flex-wrap gap-3">
+            <div><p class="text-white font-bold">${esc(DATA.name)}</p>
+              <p class="text-sm text-gray-400">${contestEnded() ? '🏁 Ended' : contestStarted() ? '🟢 Running' : '⏳ Scheduled'}</p></div>
+            <button id="delete-contest" class="btn btn-danger">🗑️ Delete</button>
+          </div>
+        </div>`;
+      }
+      
+      html += `<div class="card">
+        <h2 class="text-lg font-bold text-white mb-4">${hasContest() ? 'Edit' : 'Create'} Contest</h2>
+        <div class="space-y-4">
+          <div><label class="block text-sm text-gray-400 mb-1">Contest Name</label>
+            <input type="text" id="f-name" class="input" value="${esc(DATA.name)}" placeholder="Math Olympiad"></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm text-gray-400 mb-1">Start Time</label>
+              <input type="datetime-local" id="f-start" class="input" value="${DATA.startTime ? new Date(DATA.startTime).toISOString().slice(0,16) : ''}"></div>
+            <div><label class="block text-sm text-gray-400 mb-1">Duration (min)</label>
+              <input type="number" id="f-duration" class="input" value="${DATA.duration}"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm text-gray-400 mb-1">Freeze Last (min)</label>
+              <input type="number" id="f-freeze" class="input" value="${DATA.freezeTime}"></div>
+            <div class="flex items-center pt-6">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="f-partial" ${DATA.partialCredit ? 'checked' : ''} class="w-5 h-5">
+                <span class="text-gray-300">Partial Credit</span></label>
+            </div>
+          </div>
+        </div>
+      </div>`;
+      
+      html += `<div class="card">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold text-white">Problems</h2>
+          <button id="add-problem" class="btn btn-secondary text-sm">+ Add</button>
+        </div>
+        <div id="problems-container" class="space-y-4">`;
+      
+      (DATA.problems || []).forEach((p, i) => {
+        html += `<div class="p-4 rounded-lg bg-gray-800/50 border border-gray-700" data-pid="${p.id}">
+          <div class="flex gap-3 items-center mb-3">
+            <span class="w-8 h-8 rounded bg-blue-600 text-white flex items-center justify-center font-bold">${String.fromCharCode(65+i)}</span>
+            <input type="text" class="input flex-1 prob-name" value="${esc(p.name)}">
+            <input type="number" class="input w-20 text-center prob-pts" value="${p.points}">
+            <button class="text-red-400 hover:text-red-300 prob-del text-xl">×</button>
+          </div>
+          <div class="upload-zone prob-upload">
+            ${p.img ? `<img src="data:${p.imgType};base64,${p.img}" class="max-h-24 mx-auto rounded mb-1"><span class="text-xs text-gray-400">Click to change</span>` : '<span class="text-gray-400">📷 Upload problem image</span>'}
+          </div>
+          <input type="file" class="hidden prob-file" accept="image/*">
+        </div>`;
+      });
+      
+      if (!DATA.problems?.length) html += `<p class="text-gray-500 text-center py-4">Click "+ Add"</p>`;
+      html += `</div></div>`;
+      
+      html += `<button id="save-contest" class="btn btn-primary w-full text-lg py-4">💾 Save Contest</button>`;
+      
+      if (hasContest()) {
+        html += `<div class="card mt-6">
+          <h2 class="text-lg font-bold text-white mb-4">📋 Links</h2>
+          <div class="space-y-3">
+            <div><label class="block text-sm text-gray-400 mb-1">🏠 Home</label>
+              <div class="flex gap-2"><input type="text" readonly class="input flex-1 text-sm" value="${base}">
+                <button class="btn btn-secondary copy-btn" data-url="${base}">📋</button></div></div>
+            <div><label class="block text-sm text-gray-400 mb-1">⚖️ Judge Panel</label>
+              <div class="flex gap-2"><input type="text" readonly class="input flex-1 text-sm bg-yellow-900/20" value="${base}?judge=${JUDGE_SECRET}">
+                <button class="btn btn-secondary copy-btn" data-url="${base}?judge=${JUDGE_SECRET}">📋</button></div></div>
+          </div>
+        </div>`;
+        
+        html += `<div class="card">
+          <h2 class="text-lg font-bold text-white mb-4">📈 Stats</h2>
+          <div class="grid grid-cols-3 gap-4 mb-4">
+            <div class="p-3 rounded bg-gray-800/50 text-center">
+              <span class="block text-2xl font-bold text-cyan-400">${Object.keys(DATA.teams || {}).length}</span>
+              <span class="text-gray-400 text-sm">Teams</span></div>
+            <div class="p-3 rounded bg-gray-800/50 text-center">
+              <span class="block text-2xl font-bold text-green-400">${(DATA.submissions || []).length}</span>
+              <span class="text-gray-400 text-sm">Submissions</span></div>
+            <div class="p-3 rounded bg-gray-800/50 text-center">
+              <span class="block text-2xl font-bold text-blue-400">${getFrozenSubmissions().length}</span>
+              <span class="text-gray-400 text-sm">Frozen</span></div>
+          </div>
+          <button id="clear-subs" class="btn btn-secondary w-full">🗑️ Clear Submissions</button>
+        </div>`;
+      }
+      
+      return html + `</div></div>`;
+    }
+
+    function renderJudge() {
+      const frozen = getFrozenSubmissions();
+      const revealed = getRevealedSubmissions();
+      
+      let html = `<div class="min-h-screen p-4 sm:p-6"><div class="max-w-3xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="font-display text-2xl text-yellow-400">⚖️ Judge Panel</h1>
+          <div class="flex gap-2">
+            <a href="?board" target="_blank" class="btn btn-secondary text-sm">📊 Board</a>
+            <a href="?" class="text-gray-400 hover:text-white">← Home</a>
+          </div>
+        </div>
+        ${renderStatus()}`;
+      
+      html += `<div class="card mb-6">
+        <div class="grid grid-cols-3 gap-4 text-center">
+          <div><span class="block text-3xl font-bold text-blue-400">${frozen.length}</span><span class="text-gray-400 text-sm">Frozen</span></div>
+          <div><span class="block text-3xl font-bold text-green-400">${revealed.length}</span><span class="text-gray-400 text-sm">Revealed</span></div>
+          <div><span class="block text-3xl font-bold text-cyan-400">${(DATA.submissions || []).length}</span><span class="text-gray-400 text-sm">Total</span></div>
+        </div>
+      </div>`;
+      
+      html += `<div class="card mb-6">
+        <div class="flex gap-3 flex-wrap">
+          <button id="reveal-next" class="btn btn-success flex-1" ${frozen.length === 0 ? 'disabled' : ''}>▶️ Reveal Next (${frozen.length})</button>
+          <button id="undo-reveal" class="btn btn-warning" ${revealed.length === 0 ? 'disabled' : ''}>↩️ Undo</button>
+          <button id="reveal-all" class="btn btn-danger" ${frozen.length === 0 ? 'disabled' : ''}>⏭️ All</button>
+        </div>
+      </div>`;
+      
+      html += `<div class="card"><h2 class="text-lg font-bold text-white mb-4">❄️ Frozen Queue</h2>`;
+      if (frozen.length === 0) {
+        html += `<p class="text-gray-500 text-center py-4">No frozen submissions</p>`;
+      } else {
+        html += `<div class="space-y-2">`;
+        frozen.forEach((sub, i) => {
+          const prob = (DATA.problems || []).find(p => p.id === sub.probId);
+          const probIdx = (DATA.problems || []).indexOf(prob);
+          const scoreClass = sub.score === 100 ? 'text-green-400' : sub.score > 0 ? 'text-yellow-400' : 'text-red-400';
+          html += `<div class="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50 border border-blue-700/30">
+            <span class="text-blue-400 font-mono text-sm w-6">#${i+1}</span>
+            <span class="w-8 h-8 rounded bg-blue-600 text-white flex items-center justify-center font-bold text-sm">${probIdx >= 0 ? String.fromCharCode(65+probIdx) : '?'}</span>
+            <div class="flex-1"><span class="text-white font-medium">${esc(sub.team)}</span>
+              <span class="text-gray-500 text-xs ml-2">${fmtDateTime(sub.time)}</span></div>
+            <span class="font-mono font-bold text-lg ${scoreClass}">${sub.score}</span>
+            <span class="text-blue-400">❄️</span>
+          </div>`;
+        });
+        html += `</div>`;
+      }
+      html += `</div>`;
+      
+      if (revealed.length > 0) {
+        html += `<div class="card"><h2 class="text-lg font-bold text-white mb-4">✅ Revealed</h2>
+          <div class="space-y-2 max-h-64 overflow-y-auto">`;
+        revealed.slice().reverse().forEach(sub => {
+          const prob = (DATA.problems || []).find(p => p.id === sub.probId);
+          const probIdx = (DATA.problems || []).indexOf(prob);
+          const scoreClass = sub.score === 100 ? 'text-green-400' : sub.score > 0 ? 'text-yellow-400' : 'text-red-400';
+          html += `<div class="flex items-center gap-3 p-2 rounded bg-gray-800/30 opacity-70">
+            <span class="w-7 h-7 rounded bg-green-600/50 text-white flex items-center justify-center font-bold text-sm">${probIdx >= 0 ? String.fromCharCode(65+probIdx) : '?'}</span>
+            <span class="flex-1 text-white text-sm">${esc(sub.team)}</span>
+            <span class="font-mono font-bold ${scoreClass}">${sub.score}</span>
+            <span class="text-green-400 text-sm">✓</span>
+          </div>`;
+        });
+        html += `</div></div>`;
+      }
+      
+      return html + `</div></div>`;
+    }
+
+    function renderSubmit() {
+      let html = `<div class="min-h-screen p-4"><div class="max-w-lg mx-auto">
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="font-display text-xl text-cyan-400">${esc(DATA.name || 'Contest')}</h1>
+          <a href="?" class="text-gray-400 hover:text-white">← Back</a>
+        </div>
+        ${renderStatus()}`;
+      
+      if (!hasContest()) {
+        html += `<div class="card text-center"><p class="text-gray-400">No contest available</p></div></div></div>`;
+        return html;
+      }
+      
+      if (!hasApiKey()) {
+        html += `<div class="card text-center bg-yellow-900/20 border-yellow-700/50">
+          <p class="text-yellow-400 font-bold mb-2">⏳ Contest Starting Soon</p>
+          <p class="text-gray-400 text-sm">Please wait for the admin to finish setup</p>
+        </div></div></div>`;
+        return html;
+      }
+      
+      if (!contestStarted()) {
+        html += `<div class="card text-center"><p class="text-yellow-400 font-bold mb-2">⏳ Not Started Yet</p>
+          <p class="text-gray-400">Starts: ${new Date(DATA.startTime).toLocaleString()}</p></div></div></div>`;
+        return html;
+      }
+      
+      if (contestEnded()) {
+        html += `<div class="card text-center"><p class="text-red-400 font-bold text-xl">🏁 Contest Ended</p>
+          <a href="?board" class="btn btn-secondary mt-4">View Scoreboard</a></div></div></div>`;
+        return html;
+      }
+      
+      html += `<div class="card text-center mb-4">
+        <span class="font-mono text-2xl text-cyan-400" id="timer">${fmtTime(getRemaining())}</span>
+        ${isFrozenTime() ? '<span class="ml-2 text-blue-400">❄️</span>' : ''}
+      </div>`;
+      
+      if (myTeam) {
+        const board = calcScoreboard(true);
+        const me = board.find(t => t.name === myTeam);
+        html += `<div class="card mb-4">
+          <div class="flex justify-between items-center">
+            <div><span class="text-gray-400 text-sm">Team</span><span class="block text-lg font-bold text-white">${esc(myTeam)}</span></div>
+            ${me ? `<span class="text-3xl font-bold text-cyan-400">${me.score}</span>` : ''}
+          </div>
+          ${me ? `<div class="mt-3 flex gap-2 flex-wrap">${DATA.problems.map((p,i) => {
+            const r = me.results[p.id] || {status:'none',score:0};
+            const cls = r.status==='pending'?'cell-pending':r.status==='correct'?'cell-correct':r.status==='partial'?'cell-partial':r.status==='wrong'?'cell-wrong':'cell-none';
+            return `<div class="problem-cell ${cls}"><span class="font-bold text-white text-sm">${String.fromCharCode(65+i)}</span><span class="text-xs text-white/70">${r.score||'—'}</span></div>`;
+          }).join('')}</div>` : ''}
+        </div>`;
+      } else {
+        html += `<div class="card mb-4 text-center">
+          <p class="text-gray-400">📝 Write <span class="font-mono text-cyan-400 font-bold">team:YourName</span> on your paper</p>
+        </div>`;
+      }
+      
+      html += `<div class="card">
+        <h2 class="font-bold text-white mb-4">Submit Solution</h2>
+        <div class="mb-4">
+          <label class="block text-sm text-gray-400 mb-2">Select Problem</label>
+          <div class="grid grid-cols-${Math.min(DATA.problems.length, 5)} gap-2">
+            ${DATA.problems.map((p,i) => `<button class="prob-select p-3 rounded-lg border-2 border-gray-700 hover:border-cyan-500 text-center" data-id="${p.id}">
+              <span class="block text-xl font-bold text-cyan-400">${String.fromCharCode(65+i)}</span>
+              <span class="block text-xs text-gray-400 truncate">${esc(p.name)}</span></button>`).join('')}
+          </div>
+        </div>
+        <div id="prob-preview" class="hidden mb-4 p-3 rounded-lg bg-gray-800/50">
+          <p class="text-xs text-gray-400 mb-2">Problem:</p>
+          <img id="prob-img" class="max-h-40 mx-auto rounded">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm text-gray-400 mb-2">Your Solution Photo</label>
+          <div class="upload-zone" id="sol-upload">
+            <div id="sol-placeholder"><p class="text-gray-400">📷 Tap to take photo</p></div>
+            <div id="sol-preview" class="hidden"><img id="sol-img" class="max-h-40 mx-auto rounded mb-1">
+              <p class="text-xs text-gray-400">Tap to change</p></div>
+          </div>
+          <input type="file" id="sol-input" class="hidden" accept="image/*" capture="environment">
+        </div>
+        <button id="submit-btn" class="btn btn-primary w-full" disabled>📤 Submit</button>
+        <div id="result" class="hidden mt-4 p-4 rounded-lg"></div>
+      </div></div></div>`;
+      return html;
+    }
+
+    function renderBoard() {
+      const board = calcScoreboard(false);
+      const frozenCount = getFrozenSubmissions().length;
+      
+      let html = `<div class="min-h-screen p-4">
+        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+          <div class="flex items-center gap-3">
+            <h1 class="font-display text-xl sm:text-2xl text-cyan-400">${esc(DATA.name || 'Scoreboard')}</h1>
+            ${contestEnded() ? '<span class="px-2 py-1 rounded bg-red-900/50 text-red-400 text-xs">ENDED</span>' : ''}
+            ${frozenCount > 0 ? `<span class="px-2 py-1 rounded bg-blue-900/50 text-blue-400 text-xs">❄️ ${frozenCount}</span>` : ''}
+          </div>
+          <div class="flex items-center gap-3">
+            ${contestStarted() && !contestEnded() ? `<span class="font-mono text-xl text-cyan-400" id="timer">${fmtTime(getRemaining())}</span>` : ''}
+            <a href="?" class="text-gray-400 hover:text-white text-sm">← Back</a>
+          </div>
+        </div>
+        ${renderStatus()}`;
+      
+      if (!DATA.problems?.length) {
+        html += `<div class="card text-center"><p class="text-gray-500">No contest data</p></div></div>`;
+        return html;
+      }
+      
+      html += `<div class="overflow-x-auto rounded-xl border border-blue-900/30 bg-gray-900/50">
+        <table class="w-full min-w-max"><thead>
+          <tr class="text-xs text-gray-400 uppercase border-b border-gray-800">
+            <th class="px-3 py-3 text-left w-12">#</th>
+            <th class="px-3 py-3 text-left">Team</th>
+            ${DATA.problems.map((p,i) => `<th class="px-2 py-3 text-center w-16">${String.fromCharCode(65+i)}</th>`).join('')}
+            <th class="px-3 py-3 text-center w-20">Score</th>
+            <th class="px-3 py-3 text-center w-24">Time</th>
+          </tr>
+        </thead><tbody>`;
+      
+      if (board.length === 0) {
+        html += `<tr><td colspan="${DATA.problems.length + 4}" class="text-center py-8 text-gray-500">No teams yet</td></tr>`;
+      } else {
+        board.forEach((t, i) => {
+          html += `<tr class="border-b border-gray-800/50">
+            <td class="px-3 py-2 font-display font-bold ${i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':'text-gray-400'}">${i<3?['🥇','🥈','🥉'][i]:'#'+(i+1)}</td>
+            <td class="px-3 py-2 text-white font-medium">${esc(t.name)}</td>`;
+          
+          DATA.problems.forEach(p => {
+            const r = t.results[p.id] || { status: 'none', score: 0 };
+            const cls = r.status === 'pending' ? 'cell-pending' : r.status === 'frozen' ? 'cell-frozen' : r.status === 'correct' ? 'cell-correct' : r.status === 'partial' ? 'cell-partial' : r.status === 'wrong' ? 'cell-wrong' : 'cell-none';
+            html += `<td class="px-2 py-2 text-center"><div class="problem-cell ${cls} mx-auto">
+              <span class="font-mono text-xs font-bold text-white">${r.status === 'frozen' ? '?' : r.status !== 'none' ? r.score : '—'}</span>
+              ${r.frozen > 0 ? `<span class="text-xs text-blue-300">+${r.frozen}</span>` : ''}
+            </div></td>`;
+          });
+          
+          html += `<td class="px-3 py-2 text-center font-mono font-bold text-xl text-cyan-400">${t.score}</td>
+            <td class="px-3 py-2 text-center font-mono text-gray-400 text-sm">${fmtTime(t.time)}</td></tr>`;
+        });
+      }
+      
+      html += `</tbody></table></div>`;
+      html += `<div class="mt-4 flex justify-center gap-4 flex-wrap text-xs">
+        <div class="flex items-center gap-1"><div class="w-4 h-4 rounded cell-correct"></div><span class="text-gray-400">100</span></div>
+        <div class="flex items-center gap-1"><div class="w-4 h-4 rounded cell-partial"></div><span class="text-gray-400">Partial</span></div>
+        <div class="flex items-center gap-1"><div class="w-4 h-4 rounded cell-wrong"></div><span class="text-gray-400">0</span></div>
+        <div class="flex items-center gap-1"><div class="w-4 h-4 rounded cell-frozen"></div><span class="text-gray-400">Frozen</span></div>
+      </div></div>`;
+      return html;
+    }
+
+    let selectedProb = null, solImg = null, solType = null;
+
+    function bindEvents() {
+      document.getElementById('save-apikey')?.addEventListener('click', () => {
+        DATA.apiKey = document.getElementById('cfg-apikey')?.value?.trim() || '';
+        saveData();
+        alert('✅ API Key saved!');
+      });
+      
+      document.getElementById('delete-contest')?.addEventListener('click', () => {
+        if (confirm('DELETE contest?')) {
+          DATA = { ...DEFAULT_DATA, apiKey: DATA.apiKey };
+          saveData();
+          render();
+        }
+      });
+      
+      document.getElementById('add-problem')?.addEventListener('click', () => {
+        if (!DATA.problems) DATA.problems = [];
+        DATA.problems.push({ id: genId(), name: 'Problem ' + (DATA.problems.length + 1), points: 100, img: null, imgType: null });
+        render();
+      });
+      
+      document.querySelectorAll('.prob-upload').forEach(el => {
+        el.addEventListener('click', () => el.parentElement.querySelector('.prob-file')?.click());
+      });
+      
+      document.querySelectorAll('.prob-file').forEach(el => {
+        el.addEventListener('change', e => {
+          const file = e.target.files[0]; if (!file) return;
+          const pid = e.target.closest('[data-pid]').dataset.pid;
+          const reader = new FileReader();
+          reader.onload = ev => {
+            const prob = DATA.problems.find(p => p.id === pid);
+            if (prob) { prob.img = ev.target.result.split(',')[1]; prob.imgType = file.type; render(); }
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+      
+      document.querySelectorAll('.prob-del').forEach(el => {
+        el.addEventListener('click', () => {
+          DATA.problems = DATA.problems.filter(p => p.id !== el.closest('[data-pid]').dataset.pid);
+          render();
+        });
+      });
+      
+      document.getElementById('save-contest')?.addEventListener('click', () => {
+        const name = document.getElementById('f-name')?.value?.trim();
+        const start = document.getElementById('f-start')?.value;
+        if (!name) { alert('❌ Enter contest name'); return; }
+        if (!start) { alert('❌ Set start time'); return; }
+        if (!DATA.problems?.length) { alert('❌ Add problems'); return; }
+        
+        document.querySelectorAll('[data-pid]').forEach(el => {
+          const prob = DATA.problems.find(p => p.id === el.dataset.pid);
+          if (prob) {
+            prob.name = el.querySelector('.prob-name')?.value || prob.name;
+            prob.points = parseInt(el.querySelector('.prob-pts')?.value) || 100;
+          }
+        });
+        
+        DATA.name = name;
+        DATA.startTime = new Date(start).toISOString();
+        DATA.duration = parseInt(document.getElementById('f-duration')?.value) || 180;
+        DATA.freezeTime = parseInt(document.getElementById('f-freeze')?.value) || 30;
+        DATA.partialCredit = document.getElementById('f-partial')?.checked ?? true;
+        
+        saveData();
+        alert('✅ Contest saved!');
+      });
+      
+      document.getElementById('clear-subs')?.addEventListener('click', () => {
+        if (confirm('Clear all submissions?')) {
+          DATA.teams = {};
+          DATA.submissions = [];
+          saveData();
+        }
+      });
+      
+      document.querySelectorAll('.copy-btn').forEach(el => {
+        el.addEventListener('click', () => {
+          navigator.clipboard.writeText(el.dataset.url);
+          el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1000);
+        });
+      });
+      
+      document.getElementById('reveal-next')?.addEventListener('click', () => {
+        const frozen = getFrozenSubmissions();
+        if (frozen.length > 0) {
+          const sub = DATA.submissions.find(s => s.id === frozen[0].id);
+          if (sub) { sub.status = 'revealed'; revealHistory.push(sub.id); saveData(); }
+        }
+      });
+      
+      document.getElementById('undo-reveal')?.addEventListener('click', () => {
+        if (revealHistory.length > 0) {
+          const sub = DATA.submissions.find(s => s.id === revealHistory.pop());
+          if (sub) { sub.status = 'done'; saveData(); }
+        }
+      });
+      
+      document.getElementById('reveal-all')?.addEventListener('click', () => {
+        if (confirm('Reveal ALL?')) {
+          getFrozenSubmissions().forEach(f => {
+            const sub = DATA.submissions.find(s => s.id === f.id);
+            if (sub) { sub.status = 'revealed'; revealHistory.push(sub.id); }
+          });
+          saveData();
+        }
+      });
+      
+      document.querySelectorAll('.prob-select').forEach(el => {
+        el.addEventListener('click', () => {
+          document.querySelectorAll('.prob-select').forEach(b => b.classList.remove('border-cyan-500', 'bg-cyan-900/30'));
+          el.classList.add('border-cyan-500', 'bg-cyan-900/30');
+          selectedProb = el.dataset.id;
+          const prob = DATA.problems.find(p => p.id === selectedProb);
+          const preview = document.getElementById('prob-preview'), img = document.getElementById('prob-img');
+          if (prob?.img) { img.src = `data:${prob.imgType};base64,${prob.img}`; preview.classList.remove('hidden'); }
+          else preview?.classList.add('hidden');
+          updateBtn();
+        });
+      });
+      
+      document.getElementById('sol-upload')?.addEventListener('click', () => document.getElementById('sol-input')?.click());
+      
+      document.getElementById('sol-input')?.addEventListener('change', e => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          solImg = ev.target.result.split(',')[1]; solType = file.type;
+          document.getElementById('sol-placeholder')?.classList.add('hidden');
+          const preview = document.getElementById('sol-preview'), img = document.getElementById('sol-img');
+          if (preview && img) { img.src = ev.target.result; preview.classList.remove('hidden'); }
+          updateBtn();
+        };
+        reader.readAsDataURL(file);
+      });
+      
+      document.getElementById('submit-btn')?.addEventListener('click', doSubmit);
+    }
+    
+    function updateBtn() {
+      const btn = document.getElementById('submit-btn');
+      if (btn) btn.disabled = !selectedProb || !solImg;
+    }
+    
+    async function doSubmit() {
+      if (!selectedProb || !solImg) return;
+
+      const btn = document.getElementById('submit-btn'), result = document.getElementById('result');
+      btn.disabled = true; btn.textContent = '⏳ Grading...';
+      result.classList.remove('hidden');
+      result.className = 'mt-4 p-4 rounded-lg bg-blue-900/30 text-blue-300';
+      result.textContent = 'AI is reading...';
+
+      try {
+        const prob = DATA.problems.find(p => p.id === selectedProb);
+        const res = await gradeWithAI({ img: solImg, imgType: solType }, prob);
+
+        if (!DATA.teams) DATA.teams = {};
+        if (!DATA.submissions) DATA.submissions = [];
+
+        if (res.team && !DATA.teams[res.team]) DATA.teams[res.team] = { name: res.team };
+        if (res.team) { myTeam = res.team; localStorage.setItem('myteam', res.team); }
+
+        DATA.submissions.push({ id: genId(), probId: selectedProb, time: Date.now(), team: res.team, score: res.score, feedback: res.feedback, status: 'done' });
+        saveData();
+
+        if (!res.team) {
+          result.className = 'mt-4 p-4 rounded-lg bg-yellow-900/30 text-yellow-300';
+          result.innerHTML = `<p class="font-bold">⚠️ Team not detected</p><p class="text-sm mt-1">${esc(res.feedback)}</p>`;
+        } else {
+          const cls = res.score === 100 ? 'bg-green-900/30 text-green-300' : res.score > 0 ? 'bg-yellow-900/30 text-yellow-300' : 'bg-red-900/30 text-red-300';
+          result.className = `mt-4 p-4 rounded-lg ${cls}`;
+          result.innerHTML = `<div class="flex justify-between items-center">
+            <span class="font-bold">Team: ${esc(res.team)}</span>
+            <span class="text-2xl font-bold">${res.score}/100</span>
+          </div><p class="text-sm mt-1">${esc(res.feedback)}</p>`;
+        }
+
+        selectedProb = null; solImg = null; solType = null;
+      } catch(e) {
+        result.className = 'mt-4 p-4 rounded-lg bg-red-900/30 text-red-300';
+        result.textContent = '❌ Submission failed: ' + e.message;
+      } finally {
+        btn.textContent = '📤 Submit';
+        updateBtn();
+      }
+    }
+
+    setInterval(() => {
+      const timer = document.getElementById('timer');
+      if (timer && contestStarted()) timer.textContent = contestEnded() ? '0:00' : fmtTime(getRemaining());
+    }, 1000);
+
+    initFirebase();
+  </script>
+</body>
+</html>
