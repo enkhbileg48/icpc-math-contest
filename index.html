@@ -80,7 +80,7 @@
     let dataLoaded = false;
     
     const DEFAULT_DATA = {
-      name: '', startTime: null, duration: 180, freezeTime: 30, partialCredit: true,
+      name: '', startTime: null, duration: 180, freezeTime: 0, partialCredit: true,
       problems: [], teams: {}, submissions: [], apiKey: ''
     };
     
@@ -171,7 +171,10 @@
       return rem > 0 && rem <= DATA.freezeTime * 60 && contestStarted();
     }
     function hasContest() { return DATA.name && DATA.problems && DATA.problems.length > 0; }
-    function hasApiKey() { return DATA.apiKey && DATA.apiKey.length > 10; }
+    function hasApiKey() {
+      const k = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GEMINI_API_KEY || '');
+      return k.length > 10;
+    }
     
     function getFrozenSubmissions() {
       if (!DATA.startTime || !DATA.submissions) return [];
@@ -219,31 +222,38 @@
         return { team: null, detected: 'No API key', score: 0, feedback: 'API key not configured' };
       }
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${DATA.apiKey}`;
+      const apiKey = (DATA.apiKey && DATA.apiKey.length > 10) ? DATA.apiKey : (CONFIG?.GEMINI_API_KEY || '');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
       const correctAns = (prob.name.match(/\[([ABCD])\]/i) || [])[1]?.toUpperCase() || null;
       const cleanName = prob.name.replace(/\[[ABCD]\]/i, '').trim();
 
       const prompt = correctAns
-        ? `Look at this handwritten answer image. The student circled or wrote one letter: A, B, C, or D.
+        ? `You are grading a handwritten exam answer sheet.
 
-Find the letter the student selected. Look for a circled letter, underlined letter, or a large single letter written as the answer.
+Look at the image. The student selected ONE answer by circling, underlining, or writing a large letter: A, B, C, or D.
 
-Correct answer is ${correctAns}.
-- If student selected ${correctAns}: score = 100
-- Any other letter or blank: score = 0
+Find which letter the student selected.
+The correct answer is "${correctAns}".
+- If the student selected "${correctAns}" → score is 100
+- Any other letter, or nothing written → score is 0
 
-Respond with ONLY this JSON (no markdown, no extra text):
-{"selected_answer":"LETTER_OR_NULL","score":100_OR_0,"feedback":"one sentence in Mongolian or English"}`
-        : `Look at this handwritten answer image. The student circled or wrote one letter: A, B, C, or D.
+Respond with ONLY valid JSON, nothing else. Example format:
+{"selected_answer":"B","score":100,"feedback":"Оюутан B дугуйлсан бөгөөд зөв хариулт"}
 
-Find the letter the student selected. Look for a circled letter, underlined letter, or a large single letter written as the answer.
+Now grade this submission:`
+        : `You are grading a handwritten exam answer sheet.
 
-- If student clearly selected a letter: score = 100
-- If blank or completely illegible: score = 0
+Look at the image. The student selected ONE answer by circling, underlining, or writing a large letter: A, B, C, or D.
 
-Respond with ONLY this JSON (no markdown, no extra text):
-{"selected_answer":"LETTER_OR_NULL","score":100_OR_0,"feedback":"one sentence in Mongolian or English"}`;
+Find which letter the student selected.
+- If you can clearly see a letter (A, B, C, or D) → score is 100
+- If blank or impossible to read → score is 0
+
+Respond with ONLY valid JSON, nothing else. Example format:
+{"selected_answer":"B","score":100,"feedback":"Оюутан B дугуйлсан"}
+
+Now grade this submission:`;
 
       try {
         const parts = [{ text: prompt }];
@@ -273,9 +283,11 @@ Respond with ONLY this JSON (no markdown, no extra text):
         }
 
         const rawScore = typeof parsed.score === 'number' ? parsed.score : parseFloat(parsed.score) || 0;
-        const selected = parsed.selected_answer || null;
+        const selected = (parsed.selected_answer || '').toString().trim().toUpperCase().replace(/[^ABCD]/g, '') || null;
         // Handle binary (0/1) or percentage (0-100) scores from Gemini
         const normalizedScore = rawScore <= 0 ? 0 : rawScore <= 1 ? 100 : Math.min(100, rawScore);
+        console.log('[Grade] raw Gemini text:', text);
+        console.log('[Grade] parsed:', parsed, '→ score:', normalizedScore, 'selected:', selected);
         return {
           team: parsed.team_name || null,
           detected: selected ? `Сонгосон: ${selected}` : 'Хариу тодорхойгүй',
@@ -875,7 +887,8 @@ Respond with ONLY this JSON (no markdown, no extra text):
             <span class="font-bold text-lg">🏷️ ${esc(teamName)}</span>
             <span class="text-2xl font-bold font-mono">${res.score}/100</span>
           </div>
-          <p class="text-sm mb-3">${esc(res.feedback)}</p>
+          <p class="text-sm opacity-80 mb-1">${esc(res.detected)}</p>
+          <p class="text-xs opacity-60 mb-3">${esc(res.feedback)}</p>
           <a href="?board" class="btn btn-secondary block w-full text-center mt-2">📊 Scoreboard харах</a>`;
         }
 
